@@ -2,13 +2,14 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/rxbynerd/monocular/internal/jsonmode"
 	"github.com/rxbynerd/monocular/internal/sse"
+	"github.com/rxbynerd/monocular/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -53,8 +54,15 @@ in the instance. This is a read-only diagnostic/observability tool.`,
 			return jsonmode.Run(ctx, jcfg, os.Stdout)
 		}
 
-		fmt.Println("TUI mode not yet implemented")
-		return nil
+		appCfg := ui.AppConfig{
+			URL:       cfg.URL,
+			Directory: cfg.Directory,
+			Filter:    buildCategoryFilter(cfg.Filter),
+			NoColor:   cfg.NoColor,
+		}
+		p := tea.NewProgram(ui.NewApp(appCfg))
+		_, err := p.Run()
+		return err
 	},
 }
 
