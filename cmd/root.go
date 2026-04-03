@@ -1,9 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"os/signal"
 	"strings"
 
+	"github.com/rxbynerd/monocular/internal/jsonmode"
+	"github.com/rxbynerd/monocular/internal/sse"
 	"github.com/spf13/cobra"
 )
 
@@ -36,9 +41,16 @@ in the instance. This is a read-only diagnostic/observability tool.`,
 			NoColor:   flagNoColor,
 		}
 
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer cancel()
+
 		if cfg.JSON {
-			fmt.Println("JSON mode not yet implemented")
-			return nil
+			jcfg := jsonmode.Config{
+				URL:       cfg.URL,
+				Directory: cfg.Directory,
+				Filter:    buildCategoryFilter(cfg.Filter),
+			}
+			return jsonmode.Run(ctx, jcfg, os.Stdout)
 		}
 
 		fmt.Println("TUI mode not yet implemented")
@@ -75,6 +87,17 @@ func init() {
 	rootCmd.Flags().StringVarP(&flagFilter, "filter", "f", "", "Comma-separated event categories to show (default: all)\nCategories: session,message,permission,question,file,infra,pty,workspace,tui,todo")
 	rootCmd.Flags().BoolVar(&flagJSON, "json", false, "Output raw events as NDJSON to stdout (no TUI)")
 	rootCmd.Flags().BoolVar(&flagNoColor, "no-color", false, "Disable colors")
+}
+
+func buildCategoryFilter(categories []string) map[sse.EventCategory]bool {
+	if len(categories) == 0 {
+		return nil // nil = show all
+	}
+	filter := make(map[sse.EventCategory]bool)
+	for _, c := range categories {
+		filter[sse.EventCategory(c)] = true
+	}
+	return filter
 }
 
 func Execute() error {
