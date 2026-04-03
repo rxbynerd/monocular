@@ -90,6 +90,11 @@ func parseFilter(s string) []string {
 }
 
 func init() {
+	// Register -v/--version before Cobra's auto-generated --version flag so
+	// the short flag works. Cobra skips creating its own "version" flag when
+	// one already exists, but still uses it for version printing.
+	rootCmd.Flags().BoolP("version", "v", false, "Print version")
+
 	rootCmd.Flags().StringVarP(&flagURL, "url", "u", "http://127.0.0.1:4096", "OpenCode server URL")
 	rootCmd.Flags().StringVarP(&flagDirectory, "directory", "d", "", "Initial client-side directory filter")
 	rootCmd.Flags().StringVarP(&flagFilter, "filter", "f", "", "Comma-separated event categories to show (default: all)\nCategories: session,message,permission,question,file,infra,pty,workspace,tui,todo")
