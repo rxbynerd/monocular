@@ -478,6 +478,51 @@ func TestSummaryGeneration(t *testing.T) {
 	}
 }
 
+func TestPauseBufferOverflow(t *testing.T) {
+	s := newState()
+	s.MaxEvents = 5
+	s.UI.Paused = true
+
+	for i := 0; i < 10; i++ {
+		ApplyEvent(s, testdata.FileEdited("/p", "a.go"), now)
+	}
+
+	if len(s.UI.PauseBuffer) != 5 {
+		t.Errorf("pause buffer should be capped at MaxEvents, got %d", len(s.UI.PauseBuffer))
+	}
+
+	s.UI.Paused = false
+	FlushPauseBuffer(s)
+
+	if len(s.Events) != 5 {
+		t.Errorf("expected 5 events after flush, got %d", len(s.Events))
+	}
+}
+
+func TestFlushPauseBufferOverflow(t *testing.T) {
+	s := newState()
+	s.MaxEvents = 5
+
+	// Add 3 events to main log
+	for i := 0; i < 3; i++ {
+		ApplyEvent(s, testdata.FileEdited("/p", "a.go"), now)
+	}
+
+	// Pause and add 4 more
+	s.UI.Paused = true
+	for i := 0; i < 4; i++ {
+		ApplyEvent(s, testdata.FileEdited("/p", "b.go"), now)
+	}
+
+	s.UI.Paused = false
+	FlushPauseBuffer(s)
+
+	// 3 + 4 = 7, capped to 5
+	if len(s.Events) != 5 {
+		t.Errorf("expected 5 events (capped), got %d", len(s.Events))
+	}
+}
+
 func TestAllSampleEventsCanBeApplied(t *testing.T) {
 	s := newState()
 	// Create a session first so events that reference ses_01JTEST work

@@ -312,6 +312,96 @@ func TestCalcBackoff(t *testing.T) {
 	}
 }
 
+func TestConnectStaleDetection(t *testing.T) {
+	// Server sends connected event then goes silent to trigger stale detection.
+	// Track how many connections the server receives.
+	var connCount int
+	var mu sync.Mutex
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		connCount++
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		fmt.Fprintln(w, `data: {"payload":{"type":"server.connected","properties":{}}}`)
+		fmt.Fprintln(w, "")
+		flusher.Flush()
+		// Go silent -- stale detection should close the connection
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	eventCh := make(chan GlobalEvent, 10)
+	stateCh := make(chan ConnectionState, 20)
+
+	cfg := ConnectionConfig{
+		URL:          srv.URL,
+		MaxRetries:   3,
+		StaleTimeout: 1 * time.Second, // Very short for test
+	}
+
+	go Connect(ctx, cfg, eventCh, stateCh)
+
+	// Wait until the server sees at least 2 connections (initial + reconnect after stale)
+	timeout := time.After(12 * time.Second)
+	for {
+		mu.Lock()
+		count := connCount
+		mu.Unlock()
+		if count >= 2 {
+			cancel()
+			break
+		}
+		select {
+		case <-timeout:
+			cancel()
+			t.Fatalf("stale detection did not trigger reconnect; server saw %d connections", connCount)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func TestConnectMaxRetriesExhausted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	eventCh := make(chan GlobalEvent, 10)
+	stateCh := make(chan ConnectionState, 20)
+
+	cfg := ConnectionConfig{
+		URL:          srv.URL,
+		MaxRetries:   2,
+		StaleTimeout: 30 * time.Second,
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	var connectErr error
+	go func() {
+		defer wg.Done()
+		connectErr = Connect(ctx, cfg, eventCh, stateCh)
+	}()
+
+	wg.Wait()
+
+	if connectErr == nil {
+		t.Fatal("expected error when max retries exhausted")
+	}
+	if !strings.Contains(connectErr.Error(), "exceeded max retries") {
+		t.Errorf("error = %v, want 'exceeded max retries'", connectErr)
+	}
+}
+
 func TestConnectionStateString(t *testing.T) {
 	tests := []struct {
 		state ConnectionState
